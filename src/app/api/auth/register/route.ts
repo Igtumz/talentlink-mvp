@@ -1,87 +1,49 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { supabase } from '@/lib/supabase'
-import bcrypt from 'bcryptjs'
+import { NextResponse } from 'next/server';
+import { getSupabaseClient } from '@/lib/supabase';
 
-export async function POST(request: NextRequest) {
+export const dynamic = 'force-dynamic';
+
+export async function POST(req: Request) {
   try {
-    const { email, password, firstName, lastName } = await request.json()
+    const body = await req.json().catch(() => ({}));
+    const email = String(body?.email ?? '').trim();
+    const password = String(body?.password ?? '');
 
-    // Validar datos
-    if (!email || !password || !firstName || !lastName) {
+    // Campos opcionales; no bloquean el registro:
+    const name = body?.name ? String(body.name).trim() : undefined;
+    const username = body?.username ? String(body.username).trim() : undefined;
+
+    if (!email || !password) {
       return NextResponse.json(
-        { error: 'Todos los campos son requeridos' },
+        { ok: false, error: 'Faltan campos: email y password' },
         { status: 400 }
-      )
+      );
     }
 
-    // Validar formato de email
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-    if (!emailRegex.test(email)) {
+    if (password.length < 8) {
       return NextResponse.json(
-        { error: 'Formato de email inválido' },
+        { ok: false, error: 'La contraseña debe tener al menos 8 caracteres' },
         { status: 400 }
-      )
+      );
     }
 
-    // Validar longitud de password
-    if (password.length < 6) {
-      return NextResponse.json(
-        { error: 'La contraseña debe tener al menos 6 caracteres' },
-        { status: 400 }
-      )
-    }
-
-    // Verificar si el usuario ya existe
-    const { data: existingUser } = await supabase
-      .from('users')
-      .select('email')
-      .eq('email', email)
-      .single()
-
-    if (existingUser) {
-      return NextResponse.json(
-        { error: 'El usuario ya existe' },
-        { status: 400 }
-      )
-    }
-
-    // Hash de password
-    const passwordHash = await bcrypt.hash(password, 12)
-
-    // Crear usuario
-    const { data, error } = await supabase
-      .from('users')
-      .insert([
-        {
-          email,
-          password_hash: passwordHash,
-          first_name: firstName,
-          last_name: lastName
-        }
-      ])
-      .select()
+    const supabase = getSupabaseClient();
+    const { data, error } = await supabase.auth.signUp({ email, password });
 
     if (error) {
-      console.error('Error creating user:', error)
+      console.error('Supabase signUp error:', error);
       return NextResponse.json(
-        { error: 'Error al crear usuario' },
-        { status: 500 }
-      )
+        { ok: false, error: error.message ?? 'Error al registrar usuario' },
+        { status: 400 }
+      );
     }
 
-    // Retornar usuario sin password
-    const { password_hash, ...userWithoutPassword } = data[0]
-    
-    return NextResponse.json({
-      message: 'Usuario creado exitosamente',
-      user: userWithoutPassword
-    }, { status: 201 })
-
-  } catch (error) {
-    console.error('Server error:', error)
+    return NextResponse.json({ ok: true, data, info: { name, username } }, { status: 200 });
+  } catch (err: any) {
+    console.error('Register route error:', err);
     return NextResponse.json(
-      { error: 'Error interno del servidor' },
+      { ok: false, error: err?.message ?? 'Unexpected error' },
       { status: 500 }
-    )
+    );
   }
 }
